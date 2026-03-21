@@ -45,5 +45,8 @@ create_vector_db(doc_menus)
 # print(a["documents"])
 
 
-result = search_menu.invoke({"query": "사이드 종류 추천해줘"})
+result = search_menu.invoke({
+    "query": "시원한 디저트 추천해줘",
+    "category": "디저트"
+    })
 print(result)
