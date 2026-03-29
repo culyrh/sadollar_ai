@@ -1,9 +1,6 @@
-# sadollar-ai — feat/audio-processing
+### 크롤링, 메뉴 db, 메뉴 json 완성.
+-> 카테고리, 상품명, 가격, 이미지 등 다 포함됨. ( 총 78 개 메뉴 )
 
-키오스크의 음성 처리(STT/TTS) 모듈 구현 브랜치입니다.
-
-- **STT**: 허깅페이스 Whisper 모델 로컬 추론 (faster-whisper)
-- **TTS**: 구현 예정
 
 ---
 
@@ -25,7 +22,29 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-<br>
+---
+
+## RAG 메뉴 검색 테스트
+
+`menu.json` → ChromaDB 임베딩 저장 → 유사도 검색까지 테스트합니다.
+
+### 사전 준비
+
+`.env` 파일에 OpenAI API 키 필요:
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+### 실행
+
+```bash
+python test.py
+```
+
+처음 실행 시 `data/chroma_db/`가 생성됩니다. 이후 실행부터는 기존 DB에 upsert됩니다.
+
+---
 
 ## STT (음성 인식)
 
@@ -61,7 +80,7 @@ python voice/stt.py tests/뉴스녹음.m4a large-v3-turbo
 tests/results/뉴스녹음_medium_20260326_210639.txt
 ```
 
-<br>
+---
 
 ## 프로젝트 구조
 
