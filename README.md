@@ -1,4 +1,34 @@
-# 🍔 Sadollar AI Backend
+### 크롤링, 단품 메뉴 db, 메뉴 json 완성.
+
+-> 카테고리, 상품명, 가격, 이미지 등 다 포함됨. ( 총 78 개 메뉴 )
+
+
+⚠️ 세트 메뉴 크롤링 필요함.
+
+ria_menu.json          ← 현재처럼 단품 메뉴 (버거, 디저트, 드링크 각각)
+
+ria_options.json       ← 세트 구성 옵션 (세트_디저트 선택지, 세트_드링크 선택지, 토핑)
+
+ria_sets.json          ← 세트메뉴 (어떤 버거 + 어떤 옵션 선택 가능한지)
+
+
+---
+
+### 현재 실행 구조
+
+test.py 실행 → Python 프로세스 시작 → 메모리 초기화 → _embedding = None
+                                                              ↓
+                                                         모델 로드 (느림)
+                                                         
+test.py 종료 → 프로세스 종료 → 메모리 해제 → _embedding 사라짐
+
+
+test.py 재실행 → 또 새 프로세스 → _embedding = None → 또 모델 로드 (느림)
+
+
+=> 현재 테스트 목적으로 매번 test.py를 실행 하므로 속도 느림, FastAPI 서버에 붙이면 속도 개선.
+
+---
 
 롯데리아 메뉴 데이터를 기반으로
 **메뉴 조회 API + AI 연동용 데이터 시스템**을 구축한 백엔드 프로젝트입니다.
@@ -18,24 +48,98 @@
 
 ---
 
-## ⚙️ 현재 구현 기능
+## RAG 메뉴 검색 테스트
 
-### 1. 데이터 수집 (Crawler)
+`menu.json` → ChromaDB 임베딩 저장 → 유사도 검색까지 테스트합니다.
 
-* 롯데리아 영양성분표 페이지 크롤링
-* 메뉴명, 알레르기, kcal, 원산지 정보 수집
-* `data/menu.json` 생성
+### 사전 준비
+
+`.env` 파일에 OpenAI API 키 필요:
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+### 실행
+
+```bash
+python test.py
+```
+
+처음 실행 시 `data/chroma_db/`가 생성됩니다. 이후 실행부터는 기존 DB에 upsert됩니다.
 
 ---
 
-### 2. 데이터 저장 (SQLite)
+## STT (음성 인식)
 
-* `menu.json` → `menu.db` 변환
-* SQLite 기반 로컬 DB 구성
+허깅페이스 허브에서 Whisper 모델을 로컬로 다운로드해 추론합니다. OpenAI API를 사용하지 않습니다.
 
----
+- 모델: `Systran/faster-whisper-{size}`
+- 처음 실행 시 자동 다운로드, 이후 캐시에서 로드
 
-### 3. DB 조회 함수
+### 모델 크기 선택
+
+| 모델 | 다운로드 크기 | 속도 | 한국어 정확도 |
+|------|-------------|------|--------------|
+| small | ~500MB | 빠름 | 보통 |
+| medium | ~1.5GB | 중간 | 좋음 |
+| large-v3 | ~3GB | 느림 | 매우 좋음 |
+| large-v3-turbo | ~1.6GB | 중간 | 매우 좋음 |
+
+### 녹음파일 인식
+
+```bash
+# 기본 (medium 모델)
+python voice/stt.py tests/뉴스녹음.m4a
+
+# 모델 크기 지정
+python voice/stt.py tests/뉴스녹음.m4a small
+python voice/stt.py tests/뉴스녹음.m4a large-v3
+python voice/stt.py tests/뉴스녹음.m4a large-v3-turbo
+```
+
+결과는 터미널에 출력되고 `tests/results/` 에 텍스트 파일로 저장됩니다.
+
+```
+tests/results/뉴스녹음_medium_20260326_210639.txt
+```
+
+### 실시간 음성 인식
+
+마이크로 말하면 발화가 끝나는 시점을 자동으로 감지해 바로 인식합니다.
+
+```bash
+# 기본 (small 모델, 한국어)
+python voice/stt_realtime.py
+
+# 옵션 지정
+python voice/stt_realtime.py --model small --device cpu --language ko
+
+# 주변 소음이 많을 때 (임계값을 높여 잡음 오인식 방지)
+python voice/stt_realtime.py --threshold 0.03
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--model` | `small` | 모델 크기 (tiny / small / medium / large-v3) |
+| `--device` | `cpu` | 추론 장치 (cpu / cuda) |
+| `--language` | `ko` | 인식 언어 코드 |
+| `--threshold` | `0.01` | 음성 감지 민감도 — 낮을수록 민감, 높을수록 잡음 무시 |
+
+실행하면 마이크 대기 상태가 되고, 말을 마치면 약 0.8초 무음 후 자동으로 인식해 출력합니다.
+
+```
+[실시간 STT] 마이크 대기 중... (Ctrl+C로 종료)
+
+[인식] 안녕하세요, 주문하고 싶어요.
+      (1.23초)
+```
+
+`Ctrl+C` 로 종료합니다.
+
+<br>
+
+## 프로젝트 구조
 
 파일: `db/sqlite.py`
 
@@ -89,8 +193,22 @@ sadollar-ai/
 │   └── sqlite_loader.py
 │
 ├── db/
-│   ├── __init__.py
-│   └── sqlite.py
+│   ├── sqlite.py
+│   └── chroma.py
+│
+├── tools/
+│   ├── search_menu.py         # ChromaDB 시맨틱 검색
+│   ├── get_menu_by_name.py    # SQLite 이름 정확 조회
+│   └── get_menu_detail.py     # SQLite 상세 정보 조회
+│
+├── agent/
+│   ├── react_agent.py         # ReAct 루프 구현
+│   └── prompts.py             # 시스템 프롬프트
+│
+├── voice/
+│   ├── stt.py                 # Whisper STT (파일 인식)
+│   ├── stt_realtime.py        # Whisper STT (실시간 마이크 인식)
+│   └── tts.py                 # TTS
 │
 ├── api/
 │   ├── __init__.py
@@ -99,164 +217,7 @@ sadollar-ai/
 │       ├── __init__.py
 │       └── menu.py
 │
-├── tools/
-│   ├── __init__.py
-│   ├── get_menu_by_name.py
-│   └── get_menu_detail.py
-│
-├── requirements.txt
-└── test_db.py
+├── config.py
+├── main.py
+└── requirements.txt
 ```
-
----
-
-## 🚀 실행 방법
-
-### 1. 프로젝트 클론
-
-```bash
-git clone <레포주소>
-cd sadollar-ai
-```
-
----
-
-### 2. 패키지 설치
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-### 3. 데이터 생성
-
-```bash
-python ingestion/crawler.py
-```
-
-→ `data/menu.json` 생성
-
----
-
-### 4. DB 생성
-
-```bash
-python ingestion/sqlite_loader.py
-```
-
-→ `data/menu.db` 생성
-
----
-
-### 5. DB 테스트
-
-```bash
-python test_db.py
-```
-
----
-
-### 6. 서버 실행
-
-```bash
-uvicorn api.main:app --reload
-```
-
----
-
-### 7. 브라우저 확인
-
-* 메뉴 목록:
-  http://127.0.0.1:8000/menu
-
-* 메뉴 상세:
-  http://127.0.0.1:8000/menu/1
-
-* API 문서 (Swagger):
-  http://127.0.0.1:8000/docs
-
----
-
-## 🤖 AI 파트 사용 가이드
-
-AI 파트는 DB를 직접 접근하지 않고
-**tools 폴더의 함수만 사용하면 됩니다.**
-
-### 사용 가능한 함수
-
-```python
-from tools.get_menu_by_name import run
-from tools.get_menu_detail import run
-```
-
----
-
-### 예시
-
-```python
-run("한우불고기 세트")
-run(1)
-```
-
----
-
-## 📊 데이터 구조
-
-```json
-{
-  "id": 1,
-  "name": "한우불고기 세트",
-  "category": "set",
-  "price": null,
-  "description": "",
-  "image_url": "",
-  "is_set_available": 0,
-  "spicy_level": 0,
-  "allergens": "달걀, 밀, 대두, 우유, 쇠고기, 토마토",
-  "kcal": 684,
-  "origin_text": "쇠고기 - 국내산 한우",
-  "raw_source": "nutrition_page"
-}
-```
-
----
-
-## ⚠️ 현재 데이터 한계
-
-* 가격 없음 (`price = None`)
-* 설명 없음 (`description = ""`)
-* 이미지 없음 (`image_url = ""`)
-* 검색은 단순 LIKE 기반 (semantic search 미적용)
-
----
-
-## 🔜 향후 개발 예정
-
-* ChromaDB 기반 의미 검색 (AI 추천 강화)
-* 장바구니 API
-* 주문 API
-* 옵션 변경 기능
-* 음성(STT/TTS) 통합
-
----
-
-## 💡 역할 분리
-
-| 역할  | 담당              |
-| --- | --------------- |
-| 백엔드 | 데이터 저장 및 조회 API |
-| AI  | 의도 이해 및 tool 호출 |
-| 프론트 | UI 및 사용자 입력     |
-
----
-
-## 🧾 한 줄 요약
-
-👉 **AI가 사용할 메뉴 데이터베이스 + 조회 API를 구축한 상태**
-
----
-
-## 🙌 작성자
-
-Sadollar AI Backend
