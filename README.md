@@ -4,51 +4,6 @@
 
 ---
 
-## 프로젝트 구조
-```
-sadollar-kiosk/
-│
-├── data/                          # 데이터 파일 모음
-│   ├── ria_menu.json              # 단품 메뉴 데이터 (82개, 카테고리별 100번대 id)
-│   ├── ria_options.json           # 세트 구성 옵션 (드링크/사이드/토핑 43개)
-│   ├── ria_sets.json          # 세트 메뉴 데이터 (23개)
-│   └── ria_menu.db                # SQLite DB 파일 (gitignore 제외)
-│
-├── app/
-│   ├── rag/
-│   │   ├── loader.py              # ria_menu.json → Document 변환
-│   │   ├── vector_store.py        # ChromaDB 임베딩 저장
-│   │   └── chroma.py              # ChromaDB 연결 및 검색
-│   │
-│   └── tools/
-│       ├── menu_tools.py          # 메뉴 검색 도구 (RAG)
-│       └── cart_tools.py          # 장바구니 도구
-│
-├── crawling/
-│   ├── crawling.py                # 롯데리아 단품 메뉴 크롤링
-│   ├── crawling_sets.py           # 롯데리아 세트 메뉴 크롤링
-│   ├── db.py                      # 크롤링 결과 DB 저장
-│   └── export_js.py               # JS 데이터 추출
-│
-├── voice/
-│   ├── stt.py                     # Whisper STT 음성 인식
-│   ├── stt_realtime.py            # Whisper STT (실시간 마이크 인식) 
-│   └── tts.py                     # TTS
-│
-├── tests/
-│   ├── 뉴스녹음.m4a
-│   └── results/                   # STT 결과 저장 디렉토리
-│
-├── db_setup.py                    # DB 테이블 생성 스크립트 (최초 1회)
-├── insert_data.py                 # JSON → DB 데이터 삽입 스크립트 (최초 1회)
-├── add_imgurl.py                  # img_url 매칭 스크립트 (최초 1회)
-├── test.py                        # RAG 메뉴 검색 테스트
-├── requirements.txt
-└── .env                           # OpenAI API 키 설정 (gitignore 제외)
-```
-
----
-
 ## 시스템 동작 구조
 ```
 사용자 음성
