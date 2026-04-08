@@ -1,72 +1,140 @@
-### 크롤링, 단품 메뉴 db, 메뉴 json 완성.
+# 🍔 Sadollar Kiosk - AI 음성 주문 키오스크
 
--> 카테고리, 상품명, 가격, 이미지 등 다 포함됨. ( 총 78 개 메뉴 )
-
-
-⚠️ 세트 메뉴 크롤링 필요함.
-
-ria_menu.json          ← 현재처럼 단품 메뉴 (버거, 디저트, 드링크 각각)
-
-ria_options.json       ← 세트 구성 옵션 (세트_디저트 선택지, 세트_드링크 선택지, 토핑)
-
-ria_sets.json          ← 세트메뉴 (어떤 버거 + 어떤 옵션 선택 가능한지)
-
+롯데리아 매장에서 사용자가 음성으로 메뉴를 탐색하고 결제까지 완료할 수 있는 배리어 프리(Barrier-free) 음성 주문 시스템입니다.
 
 ---
 
-### 현재 실행 구조
-
-test.py 실행 → Python 프로세스 시작 → 메모리 초기화 → _embedding = None
-                                                              ↓
-                                                         모델 로드 (느림)
-                                                         
-test.py 종료 → 프로세스 종료 → 메모리 해제 → _embedding 사라짐
-
-
-test.py 재실행 → 또 새 프로세스 → _embedding = None → 또 모델 로드 (느림)
-
-
-=> 현재 테스트 목적으로 매번 test.py를 실행 하므로 속도 느림, FastAPI 서버에 붙이면 속도 개선.
+## 시스템 동작 구조
+```
+사용자 음성
+↓
+STT (Whisper)
+↓
+텍스트
+↓
+AI 에이전트 (LangChain)
+↓                         ↓
+ChromaDB 검색              SQLite 조회 (백엔드)
+(의미 기반 검색)            (정확한 데이터)
+↓                         ↓
+menu_id 반환    →→→        가격, 알레르기, 세트 여부
+                           장바구니, 주문, 결제 처리
+↓
+LLM 응답 생성
+↓
+TTS
+↓
+음성 출력
+```
 
 ---
 
-롯데리아 메뉴 데이터를 기반으로
-**메뉴 조회 API + AI 연동용 데이터 시스템**을 구축한 백엔드 프로젝트입니다.
+## DB 구조
+
+### SQLite 테이블 (ria_menu.db)
+
+| 테이블 | 역할 | 데이터 수 |
+|--------|------|-----------|
+| menu | 단품 메뉴 전체 | 82개 |
+| options | 세트 구성 선택지 (드링크/사이드/토핑) | 43개 |
+| set_menus | 버거별 세트 구성 및 가격 | 23개 |
+| set_options | 세트-옵션 연결 | 989개 |
+| cart | 주문 중인 장바구니 (주문 시 채워짐) | - |
+| orders | 결제 완료된 주문 내역 | - |
+| sessions | 현재 대화 상태 저장 | - |
+
+### 메뉴 ID 체계 (카테고리별 100번대)
+
+| 카테고리 | ID 범위 |
+|----------|---------|
+| 버거 | 101 ~ 199 |
+| 디저트 | 201 ~ 299 |
+| 치킨 | 301 ~ 399 |
+| 음료 | 401 ~ 499 |
+| 아이스샷 | 501 ~ 599 |
+| 토핑 | 601 ~ 699 |
 
 ---
 
-## 📌 프로젝트 개요
 
-본 프로젝트는 음성 기반 주문 시스템을 위한 백엔드로,
-메뉴 데이터를 수집하고 AI 및 프론트엔드가 사용할 수 있도록 API 형태로 제공합니다.
+## 환경 세팅
 
-### 전체 흐름
+### 1. Python 버전
+```
+Python 3.10.11 권장
+```
 
-```text
-크롤링 → JSON → SQLite DB → 조회 함수 → FastAPI → AI/프론트
+### 2. 가상환경 생성 및 활성화
+```bash
+py -3.10 -m venv venv
+
+# Windows
+venv\Scripts\activate
+
+# Mac/Linux
+source venv/bin/activate
+```
+
+### 3. 패키지 설치
+```bash
+pip install -r requirements.txt
+```
+
+### 4. 환경변수 설정
+`.env` 파일 생성 후 OpenAI API 키 입력:
+```
+OPENAI_API_KEY=sk-...
+```
+
+---
+
+## DB 초기화 (최초 1회)
+```bash
+# 1. 테이블 생성
+python db_setup.py
+
+# 2. JSON 데이터 → DB 삽입
+python insert_data.py
 ```
 
 ---
 
 ## RAG 메뉴 검색 테스트
 
-`menu.json` → ChromaDB 임베딩 저장 → 유사도 검색까지 테스트합니다.
-
-### 사전 준비
-
-`.env` 파일에 OpenAI API 키 필요:
-
-```
-OPENAI_API_KEY=sk-...
-```
-
-### 실행
-
+`ria_menu.json` → ChromaDB 임베딩 저장 → 유사도 검색까지 테스트합니다.
 ```bash
 python test.py
 ```
 
-처음 실행 시 `data/chroma_db/`가 생성됩니다. 이후 실행부터는 기존 DB에 upsert됩니다.
+처음 실행 시 ChromaDB가 생성됩니다. 이후 실행부터는 기존 DB에 upsert됩니다.
+
+> ⚠️ 현재 test.py는 매번 실행 시 모델을 새로 로드하므로 속도가 느립니다.
+> FastAPI 서버에 붙이면 모델이 메모리에 유지되어 속도가 개선됩니다.
+
+---
+
+## AI 에이전트 Tool 함수 목록
+
+LangChain ReAct 에이전트가 사용하는 tool 함수 목록입니다.
+
+| 함수 | 파일 | 기능 |
+|------|------|------|
+| `search_menu` | menu_tools.py | RAG 기반 메뉴 검색 |
+| `get_menu_by_price` | menu_tools.py | 가격 기준 메뉴 조회 (최저/최고/예산 범위) |
+| `get_menu_info` | menu_tools.py | 특정 메뉴 가격·설명 조회 |
+| `add_to_cart` | cart_tools.py | 장바구니에 메뉴 추가 |
+| `remove_from_cart` | cart_tools.py | 장바구니에서 특정 메뉴 제거 |
+| `view_cart` | cart_tools.py | 장바구니 목록 및 총 금액 확인 |
+| `confirm_order` | cart_tools.py | 주문 완료 및 결제 처리 |
+| `clear_cart` | cart_tools.py | 장바구니 전체 비우기 |
+
+<br>
+
+DB 담당이랑 확인 후 추가될 수 있는 것:
+
+| 함수 | 기능 |
+|------|------|
+|세트 메뉴 주문 | add_to_cart에 is_set, side_option, drink_option 처리 |
 
 ---
 
@@ -98,8 +166,7 @@ python voice/stt.py tests/뉴스녹음.m4a large-v3
 python voice/stt.py tests/뉴스녹음.m4a large-v3-turbo
 ```
 
-결과는 터미널에 출력되고 `tests/results/` 에 텍스트 파일로 저장됩니다.
-
+결과는 터미널에 출력되고 `tests/results/`에 텍스트 파일로 저장됩니다.
 ```
 tests/results/뉴스녹음_medium_20260326_210639.txt
 ```
@@ -137,87 +204,46 @@ python voice/stt_realtime.py --threshold 0.03
 
 `Ctrl+C` 로 종료합니다.
 
-<br>
-
-## 프로젝트 구조
-
-파일: `db/sqlite.py`
-
-지원 기능:
-
-* 메뉴 목록 조회
-* 메뉴 ID 조회
-* 메뉴 이름 조회
-* 키워드 검색
-
 ---
-
-### 4. FastAPI API 서버
-
-#### 📍 엔드포인트
-
-| Method | URL           | 설명       |
-| ------ | ------------- | -------- |
-| GET    | `/menu`       | 메뉴 목록 조회 |
-| GET    | `/menu?q=불고기` | 키워드 검색   |
-| GET    | `/menu/{id}`  | 메뉴 상세 조회 |
-
----
-
-### 5. AI 연동용 Tool
-
-AI 파트에서 DB를 직접 다루지 않고
-**함수 형태로 사용할 수 있도록 제공**
-
-#### 사용 예시
-
-```python
-from tools.get_menu_by_name import run
-
-run("한우불고기 세트")
-```
-
----
-
-## 📁 프로젝트 구조
 
 ```text
 sadollar-ai/
 │
-├── data/
-│   ├── menu.json
-│   └── menu.db
+├── data/                          # 데이터 파일 모음
+│   ├── ria_menu.json              # 단품 메뉴 데이터 (82개, 카테고리별 100번대 id)
+│   ├── ria_options.json           # 세트 구성 옵션 (드링크/사이드/토핑 43개)
+│   ├── ria_sets_raw.json          # 세트 메뉴 데이터 (23개)
+│   └── ria_menu.db                # SQLite DB 파일 (gitignore 제외)
 │
-├── ingestion/
-│   ├── crawler.py
-│   └── sqlite_loader.py
+├── app/
+│   ├── rag/
+│   │   ├── loader.py              # ria_menu.json → Document 변환
+│   │   ├── vector_store.py        # ChromaDB 임베딩 저장
+│   │   └── chroma.py              # ChromaDB 연결 및 검색
+│   │
+│   └── tools/
+│       ├── menu_tools.py          # 메뉴 검색 도구 (RAG)
+│       └── cart_tools.py          # 장바구니 도구
 │
-├── db/
-│   ├── sqlite.py
-│   └── chroma.py
-│
-├── tools/
-│   ├── search_menu.py         # ChromaDB 시맨틱 검색
-│   ├── get_menu_by_name.py    # SQLite 이름 정확 조회
-│   └── get_menu_detail.py     # SQLite 상세 정보 조회
-│
-├── agent/
-│   ├── react_agent.py         # ReAct 루프 구현
-│   └── prompts.py             # 시스템 프롬프트
+├── crawling/
+│   ├── crawling.py                # 롯데리아 단품 메뉴 크롤링
+│   ├── crawling_sets.py           # 롯데리아 세트 메뉴 크롤링
+│   ├── db.py                      # 크롤링 결과 DB 저장
+│   └── export_js.py               # JS 데이터 추출
 │
 ├── voice/
 │   ├── stt.py                 # Whisper STT (파일 인식)
 │   ├── stt_realtime.py        # Whisper STT (실시간 마이크 인식)
 │   └── tts.py                 # TTS
 │
-├── api/
-│   ├── __init__.py
-│   ├── main.py
-│   └── routes/
-│       ├── __init__.py
-│       └── menu.py
+├── tests/
+│   ├── 뉴스녹음.m4a
+│   └── results/                   # STT 결과 저장 디렉토리
 │
-├── config.py
-├── main.py
-└── requirements.txt
+├── db_setup.py                    # DB 테이블 생성 스크립트 (최초 1회)
+├── insert_data.py                 # JSON → DB 데이터 삽입 스크립트 (최초 1회)
+├── add_imgurl.py                  # img_url 매칭 스크립트 (최초 1회)
+├── test.py                        # RAG 메뉴 검색 테스트
+├── requirements.txt
+└── .env                           # OpenAI API 키 설정 (gitignore 제외)
 ```
