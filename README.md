@@ -61,19 +61,19 @@ AI 에이전트 (LangChain + GPT-4o)
 ↓
 ┌────────────────────────────────────────────────────────────────┐
 │                                                                │
-│  [메뉴 검색]              [메뉴 조회]         [장바구니/주문]    │
+│  [메뉴 검색]              [메뉴 조회]         [장바구니/주문]     │
 │  search_menu              get_menu_info      add_to_cart       │
 │                           get_menu_by_price  remove_from_cart  │
 │       ↓                        ↓             view_cart         │
 │  query(의미) 있음?              ↓             confirm_order     │
 │  ┌──YES──┐               SQLite              clear_cart        │
-│  ↓       ↓               (이름 LIKE 검색)          ↓           │
+│  ↓       ↓               (이름 LIKE 검색)          ↓            │
 │ ChromaDB  SQLite               ↓             SQLite            │
-│ (벡터검색) (카테고리           메뉴 정보      (이름 기반 매칭    │
-│  의미기반)  전체조회,           반환          → cart/orders     │
-│     ↓      LIMIT+OFFSET)                     테이블 처리)      │
+│ (벡터검색) (카테고리           메뉴 정보      (이름 기반 매칭      │ 
+│  의미기반)  전체조회,           반환          → cart/orders      │ 
+│     ↓      LIMIT+OFFSET)                     테이블 처리)       │ 
 │  텍스트     ↓                                      ↓           │
-│  반환      텍스트 반환                          결과 반환       │
+│  반환      텍스트 반환                          결과 반환        │
 └────────────────────────────────────────────────────────────────┘
 ↓
 LLM 응답 생성
