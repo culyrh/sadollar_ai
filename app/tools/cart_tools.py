@@ -6,6 +6,12 @@ from app.session_context import current_session_id
 
 DB_PATH = "data/ria_menu.db"
 
+_remove_called: set[str] = set()
+
+
+def reset_remove_flag(session_id: str) -> None:
+    _remove_called.discard(session_id)
+
 
 def _build_search_terms(normalized: str, clean_name: str) -> list[str]:
     
@@ -142,6 +148,10 @@ def remove_from_cart(item_name: str) -> str:
     """장바구니에서 메뉴를 제거한다"""
 
     session_id = current_session_id.get()
+
+    if session_id in _remove_called:
+        return "이미 이번 요청에서 처리 중입니다. 손님께 어떤 메뉴를 취소할지 확인하세요."
+    _remove_called.add(session_id)
     conn = sqlite3.connect(DB_PATH)
     conn.create_function("REPLACE_SPACE", 1, lambda s: s.replace(" ", "") if s else s)
     cur = conn.cursor()
