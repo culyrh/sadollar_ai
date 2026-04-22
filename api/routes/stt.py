@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, Query, UploadFile, WebSocket, WebSocketDisc
 from app.refine import refine_stt
 from app.agent import chat
 from voice.stt import load_model, transcribe, transcribe_array
+from voice.tts import synthesize
 
 router = APIRouter(prefix="/stt", tags=["stt"])
 
@@ -129,6 +130,10 @@ async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
                     "screen": screen,
                 }, ensure_ascii=False)
             )
+            # JSON 직후 TTS 오디오를 binary frame으로 전송 → 프론트가 받아서 바로 재생
+            if voice:
+                audio_bytes = await asyncio.to_thread(synthesize, voice)
+                await websocket.send_bytes(audio_bytes)
 
     try:
         while True:
