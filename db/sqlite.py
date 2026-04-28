@@ -249,34 +249,3 @@ def get_orders(session_id: str):
     """, (session_id,)).fetchall()
     conn.close()
     return [dict(row) for row in rows]
-
-# =====================================================
-# 세션
-# =====================================================
-
-def create_session(session_id: str):
-    conn = get_connection()
-    conn.execute("""
-        INSERT OR IGNORE INTO sessions (session_id, current_state)
-        VALUES (?, 'browsing')
-    """, (session_id,))
-    conn.commit()
-    conn.close()
-
-
-def get_session(session_id: str):
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def update_session(session_id: str, current_state: str, last_recommended: str):
-    conn = get_connection()
-    conn.execute("""
-        UPDATE sessions
-        SET current_state = ?, last_recommended = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE session_id = ?
-    """, (current_state, last_recommended, session_id))
-    conn.commit()
-    conn.close()

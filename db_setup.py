@@ -29,11 +29,6 @@
 #    - 결제 완료된 주문 내역
 #    - status: pending → paid
 #
-# 6. sessions 테이블
-#    - AI 대화 상태 관리
-#    - last_recommended: 마지막 추천 메뉴명
-#    - current_state: browsing → ordering → paying → done
-#
 # ※ 이미 테이블이 있으면 스킵하므로
 #    여러 번 실행해도 괜찮습니다.
 # =====================================================
@@ -112,18 +107,6 @@ cursor.execute("""
     )
 """)
 print("   orders 테이블 완료")
-
-# 6. sessions 테이블 생성
-print("6. sessions 테이블 생성 중...")
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS sessions (
-        session_id       TEXT PRIMARY KEY,
-        current_state    TEXT DEFAULT 'browsing',
-        last_recommended TEXT,
-        updated_at       TEXT DEFAULT (datetime('now', 'localtime'))
-    )
-""")
-print("   sessions 테이블 완료")
 
 conn.commit()
 conn.close()
