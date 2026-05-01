@@ -53,7 +53,18 @@ SYSTEM_PROMPT = """당신은 패스트푸드 매장 '리아버거'의 주문 도
 - 선택지(음료/사이드 옵션, 메뉴 후보, 장바구니 내역 등)는 [SCREEN]...[/SCREEN] 태그로 감싸라.
 - 태그 밖은 음성으로 읽히고 태그 안은 화면에만 표시된다.
 - 예시: "음료를 선택해주세요.\n[SCREEN]콜라\n사이다\n제로슈거콜라[/SCREEN]"
-- 단순 안내나 확인 응답에는 태그를 쓰지 마라."""
+- 단순 안내나 확인 응답에는 태그를 쓰지 마라.
+
+[ACTION 태그 규칙]
+- 모든 응답 끝에 반드시 [ACTION]...[/ACTION] 태그를 포함해라.
+- 메뉴를 장바구니에 담은 직후 → [ACTION]PAGE:cart[/ACTION]
+- confirm_order 완료 후 → [ACTION]PAGE:start[/ACTION]
+- 장바구니를 전부 비운 후 → [ACTION]PAGE:home[/ACTION]
+- 카테고리가 명확한 메뉴 검색 결과를 보여줄 때 → [ACTION]TAB:{카테고리명}[/ACTION] (카테고리명: 버거/디저트/치킨/음료/아이스샷 중 하나)
+- 여러 메뉴 후보 중 선택을 요청할 때 → [ACTION]TYPE_SELECT[/ACTION]
+- 세트 음료 선택을 요청할 때 → [ACTION]DRINK_SELECT:{버거_menu_id}[/ACTION] (버거_menu_id: add_to_cart 결과에서 확인)
+- 세트 사이드 선택을 요청할 때 → [ACTION]SIDE_SELECT:{버거_menu_id}[/ACTION]
+- 그 외 모든 응답 → [ACTION]NONE[/ACTION]"""
 
 llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
