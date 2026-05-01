@@ -21,8 +21,8 @@ def _build_search_terms(normalized: str, clean_name: str) -> list[str]:
 
 @tool
 def get_set_info(burger_name: str) -> str:
-    """버거의 세트 메뉴 정보와 선택 가능한 음료/사이드 옵션을 반환한다.
-    버거를 장바구니에 담은 직후 세트 여부를 확인할 때 사용하라.
+    """버거를 장바구니에 담은 직후 세트 여부를 확인하고 음료/사이드 옵션을 반환한다.
+    세트 가격 단순 조회는 get_menu_info를 사용하라.
     예) add_to_cart로 버거를 담은 후 → get_set_info 호출 → 세트 안내
     """
     conn = sqlite3.connect(DB_PATH)
@@ -237,15 +237,24 @@ def get_menu_info(name: str) -> str:
                     break
             rows = list(collected.values())
 
-    conn.close()
-
     if not rows:
+        conn.close()
         return f"'{name}' 메뉴를 찾을 수 없습니다."
 
-    return "\n".join([
-        f"메뉴명: {n}, 가격: {p}원, 설명: {d}, 알레르기: {a}, 원산지: {o}, 영양정보: {nu}"
-        for n, p, d, a, o, nu in rows
-    ])
+    result_lines = []
+    for n, p, d, a, o, nu in rows:
+        line = f"메뉴명: {n}, 가격: {p}원, 설명: {d}, 알레르기: {a}, 원산지: {o}, 영양정보: {nu}"
+        cur.execute(
+            "SELECT s.set_price FROM set_menus s JOIN menu m ON s.burger_menu_id = m.id WHERE m.name = ?",
+            (n,)
+        )
+        set_row = cur.fetchone()
+        if set_row:
+            line += f", 세트가격: {set_row[0]:,}원"
+        result_lines.append(line)
+
+    conn.close()
+    return "\n".join(result_lines)
 
 
 def search_menu_logic(query: str="", category: str = None, badge: str = None, exclude: list = [], offset: int = 0, exclude_names: list = [], max_spicy: int = None, min_spicy: int = None):
