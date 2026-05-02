@@ -238,7 +238,7 @@ async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
                 continue
 
             chunk = np.frombuffer(raw["bytes"], dtype=np.float32)
-            is_voice = rms(chunk) > ENERGY_THRESHOLD
+            is_voice = is_speech(chunk)
 
             if not in_speech:
                 pre_roll.append(chunk)
