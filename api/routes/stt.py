@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 import tempfile
+import time
 from collections import deque
 from pathlib import Path
 
@@ -19,10 +20,10 @@ import torch
 from fastapi import APIRouter, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 from silero_vad import load_silero_vad
 
-from app.refine import refine_stt
 from app.agent import chat
 from voice.stt import load_model, transcribe, transcribe_array
 from voice.tts import synthesize
+from db.sqlite import get_menu_by_name
 
 router = APIRouter(prefix="/stt", tags=["stt"])
 
@@ -40,12 +41,31 @@ _vad_model = None
 _model = None
 
 
-def split_response(text: str) -> tuple[str, str]:
-    """에이전트 응답에서 [SCREEN]...[/SCREEN] 태그를 파싱해 음성/화면 내용을 분리"""
+def split_response(text: str) -> tuple[str, str | list, str, str]:
+    """에이전트 응답에서 [REFINED], [ACTION], [SCREEN] 태그를 파싱해 분리"""
+    refined_match = re.search(r'\[REFINED\](.*?)\[/REFINED\]', text, re.DOTALL)
+    refined = refined_match.group(1).strip() if refined_match else ""
+    text = re.sub(r'\[REFINED\].*?\[/REFINED\]', '', text, flags=re.DOTALL)
+
+    action_match = re.search(r'\[ACTION\](.*?)\[/ACTION\]', text, re.DOTALL)
+    action = action_match.group(1).strip() if action_match else "NONE"
+    text = re.sub(r'\[ACTION\].*?\[/ACTION\]', '', text, flags=re.DOTALL)
+
     screen_matches = re.findall(r'\[SCREEN\](.*?)\[/SCREEN\]', text, re.DOTALL)
     voice = re.sub(r'\[SCREEN\].*?\[/SCREEN\]', '', text, flags=re.DOTALL).strip()
-    screen = screen_matches[0].strip() if screen_matches else ""
-    return voice, screen
+    screen_text = screen_matches[0].strip() if screen_matches else ""
+
+    items = []
+    for line in screen_text.splitlines():
+        name = re.sub(r'\s*\(.*?\)\s*$', '', line.lstrip('-•0123456789. ').strip())
+        if not name:
+            continue
+        row = get_menu_by_name(name)
+        if row:
+            items.append({"name": row["name"], "price": row["price"], "img_url": row["img_url"]})
+
+    screen = items if items else [line for line in screen_text.splitlines() if line.strip()]
+    return voice, screen, action, refined
 
 
 def get_model():
@@ -104,6 +124,9 @@ async def transcribe_audio(
 
 # ── WebSocket ─────────────────────────────────────────────────
 
+# 타임아웃 설정
+INACTIVITY_TIMEOUT = 180  # 3분
+
 @router.websocket("/ws")
 async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
     """
@@ -124,6 +147,7 @@ async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
     speech_buffer: list[np.ndarray] = []
     silence_count = 0
     in_speech = False
+    last_activity_time = time.time()  # ← 마지막 활동 시간 기록
 
     # 동일 세션에서 파이프라인이 동시에 실행되면 conversation_history에 race condition 발생
     # (ToolMessage가 preceding tool_calls 없이 삽입됨 → OpenAI 400 에러)
@@ -134,33 +158,35 @@ async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
         # STT → 정제 → 에이전트를 순차 실행하되, asyncio.to_thread로 동기 함수를 별도
         # 스레드에서 실행해 이벤트 루프를 블로킹하지 않음
         # pipeline_lock으로 감싸 동시 실행을 막고 히스토리 race condition 방지
+        nonlocal last_activity_time
         async with pipeline_lock:
             stt_text = await asyncio.to_thread(transcribe_array, model, audio)
             if not stt_text.strip():
                 return
-            refined_text = await asyncio.to_thread(refine_stt, stt_text.strip())
+            last_activity_time = time.time()  # ← 발화 감지 시 갱신
 
             # 욕설 필터링 (1차 필터링과 동일한 함수 재사용)
             from api.main import contains_blocked_keyword
-            if contains_blocked_keyword(refined_text):
+            if contains_blocked_keyword(stt_text.strip()):
                 await websocket.send_text(
                     json.dumps({
                         "stt_text": stt_text.strip(),
-                        "refined_text": refined_text,
                         "voice": "부적절한 표현이 포함되어 있습니다.",
                         "screen": "",
+                        "action": "NONE",
                     }, ensure_ascii=False)
                 )
-                return   
-        
-            response = await asyncio.to_thread(chat, refined_text, session_id)
-            voice, screen = split_response(response)
+                return
+
+            response = await asyncio.to_thread(chat, stt_text.strip(), session_id)
+            voice, screen, action, refined = split_response(response)
             await websocket.send_text(
                 json.dumps({
                     "stt_text": stt_text.strip(),
-                    "refined_text": refined_text,
+                    "refined_text": refined or stt_text.strip(),
                     "voice": voice,
                     "screen": screen,
+                    "action": action,
                 }, ensure_ascii=False)
             )
             # JSON 직후 TTS 오디오를 binary frame으로 전송 → 프론트가 받아서 바로 재생
@@ -168,12 +194,51 @@ async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
                 audio_bytes = await asyncio.to_thread(synthesize, voice)
                 await websocket.send_bytes(audio_bytes)
 
-    try:
+    async def check_inactivity():
+        """3분 비활성 시 장바구니 + 히스토리 초기화"""
         while True:
-            raw = await websocket.receive_bytes()
-            chunk = np.frombuffer(raw, dtype=np.float32)
+            await asyncio.sleep(30)  # 30초마다 체크
+            if time.time() - last_activity_time > INACTIVITY_TIMEOUT:
+                from db.sqlite import clear_cart
+                from app.agent import clear_history
+                clear_cart(session_id)
+                clear_history(session_id)
+                # 프론트에 초기화 알림
+                try:
+                    await websocket.send_text(
+                        json.dumps({
+                            "stt_text": "",
+                            "voice": "일정 시간 동안 이용이 없어 초기화되었습니다.",
+                            "screen": "",
+                            "action": "TIMEOUT",
+                        }, ensure_ascii=False)
+                    )
+                except:
+                    pass
 
-            is_voice = is_speech(chunk)
+    try:
+        # 타임아웃 체크 백그라운드 태스크 시작
+        asyncio.create_task(check_inactivity())
+        
+        while True:
+            raw = await websocket.receive()
+
+            # 터치 신호면 활동 시간만 갱신하고 넘어감
+            if raw.get("text"):
+                try:
+                    data = json.loads(raw["text"])
+                    if data.get("type") == "touch":
+                        last_activity_time = time.time()
+                except:
+                    pass
+                continue
+
+            # 오디오 청크 처리 (기존 VAD 로직)
+            if not raw.get("bytes"):
+                continue
+
+            chunk = np.frombuffer(raw["bytes"], dtype=np.float32)
+            is_voice = rms(chunk) > ENERGY_THRESHOLD
 
             if not in_speech:
                 pre_roll.append(chunk)
@@ -198,5 +263,8 @@ async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
                         in_speech = False
                         pre_roll.clear()
 
-    except WebSocketDisconnect:
-        pass
+    except (WebSocketDisconnect, RuntimeError):
+        from db.sqlite import clear_cart
+        from app.agent import clear_history
+        clear_cart(session_id)
+        clear_history(session_id)
