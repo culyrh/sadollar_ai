@@ -34,7 +34,9 @@ def add_to_cart(item_name: str, quantity: int = 1, customer_allergies: list = []
 
     item_name: 손님이 말한 메뉴명. 정확하지 않아도 자동으로 유사 메뉴를 찾아준다.
     customer_allergies: 손님이 대화 중 언급한 알레르기 성분 목록. 언급이 없으면 빈 리스트로 두어라.
-                        예) 손님이 "새우 알레르기 있어요" → ["새우"]
+                        예) "새우 알레르기 있어요" → ["새우"]
+    알레르기 포함으로 추가 불가 메시지가 반환되면 손님에게 안내하고 다른 메뉴를 권유하라.
+    여러 메뉴 선택지가 반환되면 그대로 보여주고 손님이 메뉴 이름으로 답하면 다시 호출하라.
     """
     conn = sqlite3.connect(DB_PATH)
     conn.create_function("REPLACE_SPACE", 1, lambda s: s.replace(" ", "") if s else s)
@@ -78,6 +80,40 @@ def add_to_cart(item_name: str, quantity: int = 1, customer_allergies: list = []
                     if row[0] not in existing_ids:
                         rows.append(row)
                         existing_ids.add(row[0])
+
+        # 2.5차: 토큰 단축 또는 제거하며 AND 재시도
+        if not rows and len(tokens) > 1:
+            # 먼저 각 토큰을 접두어로 단축 시도 (마지막 토큰부터 — 카테고리어가 보통 뒤에 옴)
+            for skip_idx in range(len(tokens) - 1, -1, -1):
+                tok = tokens[skip_idx]
+                for trim in range(1, len(tok)):
+                    shortened = tok[:-trim]
+                    if len(shortened) < 2:
+                        break
+                    test_tokens = tokens[:skip_idx] + [shortened] + tokens[skip_idx + 1:]
+                    and_conditions = " AND ".join(["REPLACE_SPACE(name) LIKE ?" for _ in test_tokens])
+                    cur.execute(
+                        f"SELECT id, price, name, allergy FROM menu WHERE {and_conditions}",
+                        [f"%{t}%" for t in test_tokens]
+                    )
+                    rows = cur.fetchall()
+                    if rows:
+                        break
+                if rows:
+                    break
+
+            # 단축으로도 안 되면 토큰 통째로 제거 (3개 이상일 때, 뒤 토큰부터 제거)
+            if not rows and len(tokens) > 2:
+                for skip_idx in range(len(tokens) - 1, -1, -1):
+                    subset = [t for i, t in enumerate(tokens) if i != skip_idx]
+                    and_conditions = " AND ".join(["REPLACE_SPACE(name) LIKE ?" for _ in subset])
+                    cur.execute(
+                        f"SELECT id, price, name, allergy FROM menu WHERE {and_conditions}",
+                        [f"%{t}%" for t in subset]
+                    )
+                    rows = cur.fetchall()
+                    if rows:
+                        break
 
         # 3차: 접두어를 긴 것부터 수집, 검색어 절반 길이까지 내려가며 누락 메뉴 추가.
         if not rows:
@@ -142,7 +178,7 @@ def add_to_cart(item_name: str, quantity: int = 1, customer_allergies: list = []
     conn.commit()
     conn.close()
 
-    return f"{actual_name} {quantity}개를 장바구니에 추가했습니다."
+    return f"{actual_name} {quantity}개를 장바구니에 추가했습니다. (menu_id:{menu_id})"
 
 
 @tool
@@ -178,7 +214,11 @@ def view_cart() -> str:
 
 @tool
 def remove_from_cart(item_name: str) -> str:
-    """장바구니에서 메뉴를 제거한다"""
+    """장바구니에서 메뉴를 제거한다.
+
+    메뉴명이 명확히 여러 개일 때만 여러 번 호출하라. 1개만 언급했을 때는 1번만 호출하라.
+    여러 메뉴 선택지가 반환되면 손님에게 어떤 메뉴를 취소할지 물어봐라.
+    """
 
     session_id = current_session_id.get()
 
@@ -444,17 +484,30 @@ def upgrade_to_set(burger_name: str, drink_option: str, side_option: str) -> str
     conn.create_function("REPLACE_SPACE", 1, lambda s: s.replace(" ", "") if s else s)
     cur = conn.cursor()
 
-    normalized = burger_name.replace(" ", "")
+    clean_name = burger_name.strip()
+    tokens = [t for t in clean_name.split() if t] or [clean_name.replace(" ", "")]
 
-    # cart에 담긴 버거 중 이름이 일치하고 set_menus에 있는 항목을 한 번에 조회
-    cur.execute("""
-        SELECT c.cart_id, m.name, s.set_price
-        FROM cart c
-        JOIN menu m ON c.menu_id = m.id
-        JOIN set_menus s ON s.burger_menu_id = m.id
-        WHERE c.session_id = ? AND REPLACE_SPACE(m.name) LIKE ?
-    """, (session_id, f"%{normalized}%"))
-    row = cur.fetchone()
+    def search_cart_set(token_list):
+        and_conditions = " AND ".join(["REPLACE_SPACE(m.name) LIKE ?" for _ in token_list])
+        cur.execute(f"""
+            SELECT c.cart_id, m.name, s.set_price
+            FROM cart c
+            JOIN menu m ON c.menu_id = m.id
+            JOIN set_menus s ON s.burger_menu_id = m.id
+            WHERE c.session_id = ? AND {and_conditions}
+        """, [session_id] + [f"%{t}%" for t in token_list])
+        return cur.fetchone()
+
+    # 1차: 전체 토큰 AND 검색
+    row = search_cart_set(tokens)
+
+    # 2차: 토큰 하나씩 제거하며 재시도 (뒤 토큰부터 — 카테고리어가 보통 뒤에 옴)
+    if not row and len(tokens) > 1:
+        for skip_idx in range(len(tokens) - 1, -1, -1):
+            subset = [t for i, t in enumerate(tokens) if i != skip_idx]
+            row = search_cart_set(subset)
+            if row:
+                break
 
     if not row:
         conn.close()
