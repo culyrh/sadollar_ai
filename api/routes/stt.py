@@ -9,7 +9,6 @@ WS    WS   /stt/ws          - 오디오 청크 스트리밍 → 실시간 텍스
 
 import asyncio
 import json
-import re
 import tempfile
 import time
 from collections import deque
@@ -18,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import APIRouter, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 
-from app.agent import chat
+from app.agent import AgentResponse, chat
 from voice.stt import load_model, transcribe, transcribe_array
 from voice.tts import synthesize
 
@@ -37,20 +36,12 @@ _model = None
 
 
 def split_response(text: str) -> tuple[str, str, str, str]:
-    """에이전트 응답에서 [REFINED], [ACTION], [SCREEN] 태그를 파싱해 분리"""
-    refined_match = re.search(r'\[REFINED\](.*?)\[/REFINED\]', text, re.DOTALL)
-    refined = refined_match.group(1).strip() if refined_match else ""
-    text = re.sub(r'\[REFINED\].*?\[/REFINED\]', '', text, flags=re.DOTALL)
-
-    action_match = re.search(r'\[ACTION\](.*?)\[/ACTION\]', text, re.DOTALL)
-    action = action_match.group(1).strip() if action_match else "NONE"
-    text = re.sub(r'\[ACTION\].*?\[/ACTION\]', '', text, flags=re.DOTALL)
-
-    screen_match = re.search(r'\[SCREEN\](.*?)\[/SCREEN\]', text, re.DOTALL)
-    screen = screen_match.group(1).strip() if screen_match else ""
-    voice = re.sub(r'\[SCREEN\].*?\[/SCREEN\]', '', text, flags=re.DOTALL).strip()
-
-    return voice, screen, action, refined
+    """에이전트 JSON 응답을 파싱해 (voice, screen, action, refined) 반환"""
+    try:
+        data = AgentResponse.model_validate_json(text)
+        return data.voice, data.screen, data.action, data.refined
+    except Exception:
+        return text, "", "NONE", ""
 
 
 def get_model():
@@ -226,12 +217,24 @@ async def stt_websocket(websocket: WebSocket, session_id: str = "default"):
         while True:
             raw = await websocket.receive()
 
-            # 터치 신호면 활동 시간만 갱신하고 넘어감
+            # 텍스트 이벤트 처리
             if raw.get("text"):
                 try:
                     data = json.loads(raw["text"])
                     if data.get("type") == "touch":
                         last_activity_time = time.time()
+                    elif data.get("type") == "payment_complete":
+                        from db.sqlite import clear_cart
+                        from app.agent import clear_history
+                        clear_cart(session_id)
+                        clear_history(session_id)
+                        voice_text = "주문이 완료되었습니다. 감사합니다!"
+                        audio_bytes = await asyncio.to_thread(synthesize, voice_text)
+                        await websocket.send_text(
+                            json.dumps({"voice": voice_text, "action": "PAGE:complete"}, ensure_ascii=False)
+                        )
+                        if audio_bytes:
+                            await websocket.send_bytes(audio_bytes)
                 except:
                     pass
                 continue

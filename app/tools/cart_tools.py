@@ -42,8 +42,9 @@ def add_to_cart(item_name: str, quantity: int = 1, customer_allergies: list = []
     conn.create_function("REPLACE_SPACE", 1, lambda s: s.replace(" ", "") if s else s)
     cur = conn.cursor()
 
-    # [BEST], [NEW] 등 badge 태그 제거 후 공백 정규화.
+    # [BEST], [NEW] 등 badge 태그 제거, "세트" 단어 제거 (세트는 upgrade_to_set으로 처리)
     clean_name = re.sub(r'\[.*?\]', '', item_name).strip()
+    clean_name = re.sub(r'\s*세트\s*', ' ', clean_name).strip()
     normalized = clean_name.replace(" ", "")
 
     # 1차: 완전 일치.
@@ -414,8 +415,9 @@ def update_cart_quantity(item_name: str, quantity: int) -> str:
 @tool
 def confirm_order(payment_method: str = "카드") -> str:
     """장바구니를 주문 완료 처리한다.
-    손님이 "주문할게요", "결제할게요", "이걸로 할게요" 등을 말할 때 사용하라.
-    payment_method: 결제 수단. 기본값 카드. 카드/모바일 중 하나.
+    반드시 손님이 결제 수단(카드/모바일)을 명확히 선택한 후에만 호출하라.
+    "담아줘", "응", "네" 등 장바구니 담기 확인은 add_to_cart를 사용하라. 이 툴을 쓰지 마라.
+    payment_method: 결제 수단. 카드/모바일 중 하나.
     """
     if payment_method not in ("카드", "모바일"):
         return "결제 수단은 카드 또는 모바일 중 하나를 선택해 주세요."
