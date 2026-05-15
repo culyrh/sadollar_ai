@@ -76,29 +76,30 @@ AI 에이전트 (LangChain + GPT-4o)
 ↓
 도구 선택
 ↓
-─────────────────────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
 │  [메뉴 검색]                    [메뉴 조회]          [장바구니/주문]           │
 │  search_menu                   get_menu_info        add_to_cart             │
 │       ↓                        get_menu_by_price    update_cart_quantity    │
-│  어떤 경로?                     get_set_info         remove_from_cart        │
-│                                      ↓              upgrade_to_set          │
-│  ① exclude만 있음                  SQLite            view_cart               │
-│     → SQL 전체조회                (이름/가격          confirm_order           │
-│       알레르기 필터                  LIKE 검색)       clear_cart              │
-│                                      ↓                    ↓                 │
-│  ② badge만 있음                  정보 반환          SQLite 3단계 이름 매칭     │
-│     → SQL badge LIKE 검색                          1차: 완전일치              │
-│                                                    2차: AND검색              │
-│  ③ category만 있음                                     + 가장 긴 토큰 병합    │
-│     → SQL 카테고리 조회                             3차: 접두어 수집           │
-│       (LIMIT 3, OFFSET)                                 ↓                   │
-│                                                    cart/orders/order_items  │
-│  ④ 그 외 (query 있음 등)                            테이블 처리               │
-│     → ChromaDB 벡터 검색                                ↓                    │
-│       (유사도 0.7 임계값)                           결과 반환                 │
-│          ↓                                                                  │
-│      텍스트 반환                                                             │
+│  query 있음?                   get_menu_by_nutrition remove_from_cart       │
+│                                get_set_info         upgrade_to_set          │
+│  NO → SQL 경로                       ↓              downgrade_to_single     │
+│  조건 조합 가능:                   SQLite            view_cart               │
+│  - category = ?                (이름/가격             confirm_order          │
+│  - badge LIKE ?                  LIKE 검색)          clear_cart             │
+│  - exclude_names NOT LIKE ?          ↓                    ↓                 │
+│  - allergy/desc NOT LIKE ?      정보 반환          SQLite 3단계 이름 매칭     │
+│  - spicy_level = 0 or >= 1                         1차: 완전일치             │
+│  LIMIT: exclude시 10, 아니면 3                     2차: AND검색              │
+│  정렬: BEST→NEW→기타                                    + 가장 긴 토큰 병합   │
+│                                                    3차: 접두어 수집          │
+│  YES → ChromaDB 벡터 검색                               ↓                   │
+│  - category는 ChromaDB where 필터              cart/orders/order_items      │
+│  - spicy/badge/exclude는 후처리 필터링           테이블 처리                  │
+│  - 필터 없을 때만 score < 0.5 임계값 적용              ↓                      │
+│  - 결과: 메뉴명만 반환                           결과 반환                    │
+│       ↓                                                                     │
+│  exclude가 query에 포함되면 SQL로 강제 전환                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ↓
 LLM 응답 생성
@@ -121,7 +122,7 @@ TTS
 현재 `search_menu`는 LangChain Self-querying Retriever 대신 **수동 파라미터 추출** 방식을 사용한다.
 
 **현재 방식 (수동 파라미터 추출)**
-- LLM이 사용자 발화에서 `query`, `category`, `badge`, `exclude`, `exclude_names`, `offset` 파라미터를 직접 추출해 tool에 넘김
+- LLM이 사용자 발화에서 `query`, `category`, `badge`, `exclude`, `exclude_names`, `spicy_level`, `offset` 파라미터를 직접 추출해 tool에 넘김
 - tool docstring의 예시가 LLM의 파라미터 추출을 가이드
 - 결과적으로 Self-querying과 동일한 효과
 
@@ -132,13 +133,7 @@ TTS
 **Self-querying 도입을 고려할 시점**
 - DB/ChromaDB 스키마 확정 이후
 - "세트 포함 + 8000원 이하 + 매운 버거" 같은 복합 필터 쿼리 실패 케이스가 쌓일 때
-
-### 3. 현재 한계 및 향후 개선 계획
-
-**remove_from_cart 중복 호출**
-- 현재: SYSTEM_PROMPT 지시 + 턴당 1회 플래그(`_remove_called`)로 방지
-- 한계: LLM이 히스토리에서 정확한 메뉴명을 알고 있을 때 엣지케이스 발생 가능
-
+  
 ---
 
 ## 전체 파이프라인 테스트
@@ -183,7 +178,7 @@ python test_pipeline.py --play-audio
 
 ## 1. AI 에이전트 Tool 함수 목록
 
-LangChain ReAct 에이전트가 사용하는 tool 함수 목록입니다.
+LangChain ReAct 에이전트가 사용하는 tool 함수(총 13개) 목록입니다.
 
 | 함수 | 파일 | 기능 |
 |------|------|------|
@@ -196,6 +191,7 @@ LangChain ReAct 에이전트가 사용하는 tool 함수 목록입니다.
 | `update_cart_quantity` | cart_tools.py | 장바구니 수량 변경 (0 이하면 자동 제거) |
 | `remove_from_cart` | cart_tools.py | 장바구니에서 특정 메뉴 제거 |
 | `upgrade_to_set` | cart_tools.py | 단품 버거 → 세트 전환 (음료/사이드 지정, 추가금액 반영) |
+| `downgrade_to_single` | cart_tools.py | 세트 → 단품 버거 전환 |
 | `view_cart` | cart_tools.py | 장바구니 목록 및 총 금액 확인 |
 | `confirm_order` | cart_tools.py | 주문 완료 및 결제 처리 |
 | `clear_cart` | cart_tools.py | 장바구니 전체 비우기 |
