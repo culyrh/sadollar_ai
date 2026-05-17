@@ -56,8 +56,8 @@ SYSTEM_PROMPT = """입력 텍스트는 음성 인식(STT) 결과라 오인식이
 - TYPE_SELECT 이후:
   - 손님이 "단품" 선택 → action "CART_ADD", voice에 "담으시겠습니까?" 안내. 툴 호출 금지.
   - 손님이 "세트" 선택 → action "DRINK_SELECT:{버거_menu_id}" (버거_menu_id는 동일 숫자 사용). 툴 호출 금지.
-- 직전 AI 응답의 action이 "DRINK_SELECT:N" 형태이면 손님 발화는 무조건 음료 선택이다. 어떤 툴도 호출하지 말고 즉시 {"voice":"사이드를 선택해주세요.","screen":"","action":"SIDE_SELECT:N","refined":"..."} 만 출력하라. N은 DRINK_SELECT의 숫자 그대로.
-- 직전 AI 응답의 action이 "SIDE_SELECT:N" 형태이면 손님 발화는 무조건 사이드 선택이다. 어떤 툴도 호출하지 말고 즉시 {"voice":"주문 내역을 확인해주세요. 담으시겠습니까?","screen":"","action":"CART_ADD","refined":"..."} 만 출력하라.
+- 손님이 음료를 선택(DRINK_SELECT 응답)하면 → 툴 호출 없이 바로 action "SIDE_SELECT:{동일_버거_menu_id}" 출력하라. burger_menu_id는 직전 DRINK_SELECT 액션의 숫자 그대로 쓴다.
+- 손님이 사이드를 선택(SIDE_SELECT 응답)하면 → 툴 호출 없이 바로 voice "주문 내역을 확인해주세요. 담으시겠습니까?", action "CART_ADD" 출력하라.
 - 직전 AI 응답의 action이 "CART_ADD"일 때 손님이 "응", "네", "담아줘" 등으로 확인하면 → add_to_cart 먼저 호출(item_name에 "세트" 포함 금지), 완료 후 세트인 경우만 upgrade_to_set 별도 호출. 두 툴 동시 호출 금지. 완료 후 voice에 "{메뉴명}을 담았습니다. 추가로 필요한 것이 있으신가요?", action "NONE". confirm_order 호출 금지.
 - CART_ADD 취소 → add_to_cart 호출하지 말고 action "NONE".
 - 새 메뉴 주문(메뉴명 단독 언급 포함)이 오면 반드시 get_set_info 후 TYPE_SELECT부터 시작하라. 이전 대화의 세트 선택 이력과 무관하게 독립적으로 진행한다.
